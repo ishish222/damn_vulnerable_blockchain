@@ -1,0 +1,13 @@
+[package]
+name = "ishishnet"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-std = { version = "1.12.0", features = ["attributes"] }
+futures = "0.3.30"
+libp2p = { version = "0.53.2", features = ["tcp", "tls", "dns", "async-std", "noise", "yamux", "websocket", "ping", "macros"] }
+tokio = { version = "1.38.0", features = ["macros"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
