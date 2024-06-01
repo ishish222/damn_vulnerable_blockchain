@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug ishishnet",
+            "name": "Debug ishishnet fast",
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/target/debug/ishishnet",
@@ -11,6 +11,18 @@
             "stopOnEntry": false,
             "sourceLanguages": ["rust"],
             "preLaunchTask": "build"
+        },
+        {
+            "name": "Debug ishishnet slow",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/ishishnet",
+            "args": ["3"],
+            "cwd": "${workspaceFolder}",
+            "stopOnEntry": false,
+            "sourceLanguages": ["rust"],
+            "preLaunchTask": "build"
         }
+
     ]
 }

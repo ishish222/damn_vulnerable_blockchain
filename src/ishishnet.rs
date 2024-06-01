@@ -13,7 +13,7 @@ use std::{
 
 use sha2::{Sha256, Digest};
 use serde::{Serialize, Deserialize};
-
+use rand::Rng;
 
 #[derive(Debug)]
 pub enum IshIshError {
@@ -61,7 +61,7 @@ impl<'a> TryFrom<&'a Vec<u8>> for IshIshBlockchainEvent<'a> {
     {
         let value_str = str::from_utf8(value)?;
     
-        let (header, message) = (&value_str[..3], &value_str[3..]);
+        let (header, message) = (&value_str[..3], &value_str[3..]); // good example for threat modelling
 
         //let (header, value_str) = explode(value_str).ok_or(IshIshError::InvalidMessageHeader)?;
         //let (message, _) = explode(value_str).ok_or(IshIshError::EmptyMessage)?; //needs corrections
@@ -92,7 +92,8 @@ pub async fn proof_of_work(
     difficulty: usize
     ) -> Result<IshIshBlock, IshIshError> {
     println!("proof_of_work::start");
-    let mut nonce = 0;
+
+    let mut nonce = rand::thread_rng().gen();
     loop {
         let mut hasher = Sha256::new();
         block.header.nonce = nonce;
@@ -112,7 +113,6 @@ pub async fn proof_of_work(
             return Ok(block);
         }
         nonce += 1;
-        //print!(".");
     }
 }
 

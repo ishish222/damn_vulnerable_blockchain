@@ -1482,6 +1482,7 @@ dependencies = [
  "async-trait",
  "futures",
  "libp2p",
+ "rand",
  "serde",
  "serde_json",
  "sha2",
