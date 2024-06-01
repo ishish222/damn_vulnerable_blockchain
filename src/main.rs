@@ -1,4 +1,3 @@
-use async_std::println;
 use futures::stream::StreamExt;
 use libp2p::{
     gossipsub, 
@@ -22,80 +21,11 @@ use tokio::{
     select
 };
 use tracing_subscriber::EnvFilter;
-/* 
-mod ishishnet {
 
-    use std::convert::TryFrom;
-    use std::error::Error;
-    use std::fmt::Display;
-    use std::fmt::Formatter;
-    use std::str;
-    use std::str::Utf8Error;
-
-    #[derive(Debug)]
-    pub enum IshIshError {
-        ParseError,
-        EmptyMessage,
-        InvalidEvent
-    }
-
-    impl Display for IshIshError {
-        fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> 
-        { 
-            write!(f, "Error");
-            Ok(())
-        }
-    }
-
-    impl Error for IshIshError {}
-
-    impl From<Utf8Error> for IshIshError {
-        fn from(_: Utf8Error) -> Self {
-            IshIshError::ParseError
-        }
-    }
-
-    pub enum IshIshBlockchainEvent {
-        NewBlockMined(String),
-        SthElse((String, String))
-    }
-
-    impl TryFrom<Vec<u8>> for IshIshBlockchainEvent {
-        type Error = IshIshError;
-
-        fn try_from(value: Vec<u8>) -> Result<Self, IshIshError> 
-        {
-            let value_str = str::from_utf8(&value)?;
-            match explode(value_str) {
-                Some((event, value_str)) => {
-                    match event {
-                        "NBM" => {
-                            return Ok(IshIshBlockchainEvent::NewBlockMined(value_str.into()))
-
-                        },
-                        _ => return Ok(IshIshBlockchainEvent::SthElse((event.into(), value_str.into())))
-                    }
-                }
-                None => return Err(IshIshError::EmptyMessage)
-            }
-        }
-    }
-
-    fn explode(message: &str) -> Option<(&str, &str)> {
-        message.chars().enumerate().find_map(|(i, c)| { 
-            if c == ' ' {
-                Some((&message[..i], &message[i+1..]))
-            }
-            else {
-                None
-            }
-        })
-    }
-    
-}
+mod ishishnet;
 
 use ishishnet::IshIshBlockchainEvent;
-*/
+
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
 struct IshIshClientBehavior {
@@ -105,8 +35,6 @@ struct IshIshClientBehavior {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    println!("Entry point");
-
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .try_init();
@@ -187,12 +115,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     propagation_source: peer_id,
                     message_id: id,
                     message,
-                })) => { println!(
-                    "Got message: '{}' with id: {id} from peer: {peer_id}",
-                    String::from_utf8_lossy(&message.data),                    
-                ); },
-                /*{
-                    match IshIshBlockchainEvent::try_from(message.data)? {
+                })) => {
+                    match IshIshBlockchainEvent::try_from(&message.data)? {
                         IshIshBlockchainEvent::NewBlockMined(msg) => {
                             println!("Got new block: {msg}");
                         },
@@ -200,7 +124,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             println!("Something else: {msg} {re}");
                         }
                     }
-                },*/
+                },
                 SwarmEvent::NewListenAddr { address, .. } => {
                     println!("Local node is listening on {address}");
                 }
