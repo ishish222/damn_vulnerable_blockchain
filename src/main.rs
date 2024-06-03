@@ -172,8 +172,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(mining_task(
         block_rx, 
         mined_block_tx, 
-        control_rx, 
-        difficulty));
+        control_rx));
 
     // Kick it off
     loop {
@@ -185,7 +184,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 match line.as_str() {
                     "start" => {
                         println!("Starting mining");
-                        mine_new_block(&my_blockchain, &block_tx, &control_tx).await?
+                        mine_new_block(&my_blockchain, &block_tx, &control_tx, difficulty).await?
                     },
                     "stop" => {
                         println!("Stopping mining");
@@ -203,14 +202,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 println!("Successfuly mined block: {:?}", mined_block);
 
                 /* Add the new block to my_blockchain */
-                if let Err(e) = my_blockchain.append(mined_block.clone(), difficulty) {
+                if let Err(e) = my_blockchain.append(mined_block.clone()) {
                     println!("Append error: {e:?}");
                 }
 
                 /* Broadcast info about the new blockchain via data availability layer */
                 broadcast_new_blockchain(&mut swarm, &topic, &my_blockchain)?;
                 stop_mining(&control_tx).await?;
-                mine_new_block(&my_blockchain, &block_tx, &control_tx).await?;
+                mine_new_block(&my_blockchain, &block_tx, &control_tx, difficulty).await?;
             },
 
             /* Processing events from the data availability layer */
@@ -240,15 +239,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             /* Processing, consume both and return selected */
                             my_blockchain = process_new_blockchain(
                                 new_blockchain, 
-                                my_blockchain, 
-                                &block_tx, 
-                                &control_tx
+                                my_blockchain
                             ).await?;
 
                             // Requestng mining new block IF mining
                             if *control_tx.borrow() {
                                 stop_mining(&control_tx).await?;
-                                mine_new_block(&my_blockchain, &block_tx, &control_tx).await?;
+                                mine_new_block(&my_blockchain, &block_tx, &control_tx, difficulty).await?;
                             }                            
                         },
                         IshIshBlockchainEvent::SthElse((msg,re)) => {

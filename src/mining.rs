@@ -49,8 +49,8 @@ pub async fn proof_of_work(
 pub async fn mining_task(
     mut rx: mpsc::Receiver<IshIshBlock>, 
     mut tx: mpsc::Sender<IshIshBlock>, 
-    mut control_rx: watch::Receiver<bool>, 
-    difficulty: usize) 
+    mut control_rx: watch::Receiver<bool>
+    ) 
     {
 
     loop {
@@ -67,6 +67,7 @@ pub async fn mining_task(
                     println!("Mining interrupted.");
                 }
                 mined_block = async {
+                    let difficulty = block.header.difficulty;
                     proof_of_work(block, difficulty).await
                 } => {
                     match mined_block {
@@ -104,12 +105,13 @@ pub async fn stop_mining(
 pub async fn mine_new_block(
     blockchain: &IshIshBlockchain,
     block_tx: &mpsc::Sender<IshIshBlock>,
-    control_tx: &watch::Sender<bool>
+    control_tx: &watch::Sender<bool>,
+    difficulty: usize
 ) -> Result<(), Box<dyn std::error::Error>> {
     
     println!("Building & sending block proposal");
     if blockchain.blocks.len() == 0 {
-        let first = IshIshBlock::empty_from_content("First".into());
+        let first = IshIshBlock::empty_from_content("First".into(), difficulty);
         block_tx.send(first).await?;
     }
     else {
@@ -117,7 +119,8 @@ pub async fn mine_new_block(
         let new_content = format!("Block number: {}", blockchain.blocks.len());
         let next = IshIshBlock::linked_from_content(
             new_content, 
-            mined_block.header.cur_hash
+            mined_block.header.cur_hash,
+            difficulty
         );
         block_tx.send(next).await?;
     }

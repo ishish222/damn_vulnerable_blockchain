@@ -24,7 +24,8 @@ pub enum IshIshError {
     MiningError,
     HashConversionFailed,
     InvalidProofOfWork,
-    PrevHashMismatch
+    PrevHashMismatch,
+    EmptyBlockchain
 }
 
 impl Display for IshIshError {
@@ -89,22 +90,25 @@ fn explode(message: &str) -> Option<(&str, &str)> {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IshIshBlockHeader {
     pub nonce: u64,
+    pub difficulty: usize,
     pub cur_hash: [u8; 32],
     prev_hash: [u8; 32],
 }
 
 impl IshIshBlockHeader {
-    pub fn empty() -> Self {
+    pub fn empty(difficulty: usize) -> Self {
         Self {
             nonce: 0,
+            difficulty: difficulty,
             cur_hash: [0; 32],
             prev_hash: [0; 32]
         }
     }
 
-    pub fn from_prev_hash(prev_hash: [u8; 32]) -> Self {
+    pub fn from_prev_hash(prev_hash: [u8; 32], difficulty: usize) -> Self {
         Self {
             nonce: 0,
+            difficulty: difficulty,            
             cur_hash: [0; 32],
             prev_hash: prev_hash
         }
@@ -118,16 +122,16 @@ pub struct IshIshBlock {
 }
 
 impl IshIshBlock {
-    pub fn empty_from_content(content: String) -> Self {
+    pub fn empty_from_content(content: String, difficulty: usize) -> Self {
         Self {
-            header: IshIshBlockHeader::empty(),
+            header: IshIshBlockHeader::empty(difficulty),
             content: content
         }
     }
 
-    pub fn linked_from_content(content: String, prev_hash: [u8; 32]) -> Self {
+    pub fn linked_from_content(content: String, prev_hash: [u8; 32], difficulty: usize) -> Self {
         Self {
-            header: IshIshBlockHeader::from_prev_hash(prev_hash),
+            header: IshIshBlockHeader::from_prev_hash(prev_hash, difficulty),
             content: content
         }
     }
@@ -145,38 +149,36 @@ impl IshIshBlockchain {
         }
     }
 
-    pub fn append(&mut self, mut block: IshIshBlock, difficulty: usize) -> Result<(), IshIshError> {
-        self.verify_block(block.clone(), difficulty)?;
+    pub fn append(&mut self, mut block: IshIshBlock) -> Result<(), IshIshError> {
+        self.verify_block(block.clone())?;
         self.blocks.push(block);
         Ok(())
     }
     
-    fn verify_block(&self, block: IshIshBlock, difficulty: usize) -> Result<(), IshIshError> {
-        let pow_ok = validate_pow(block.clone(), difficulty)?;
+    fn verify_block(&self, block: IshIshBlock) -> Result<(), IshIshError> {
+        let pow_ok = validate_pow(block.clone(), block.header.difficulty)?;
         
         // check POW
         if !pow_ok {
             return Err(IshIshError::InvalidProofOfWork);
-        }
-
-        // check link to previous block
-        match self.blocks.last() {
-            Some(last_block) => {
-                if block.header.prev_hash != last_block.header.cur_hash
-                {
-                    return Err(IshIshError::PrevHashMismatch);
-                }
-            },
-            None => {
-                // first block, always good
-            }
-        }
-        
+        }        
         Ok(())
     }
 
     pub fn verify_chain(&self) -> Result<(), IshIshError> {
-        // For now I assume its good xD
+        
+        /* First check the pow of each block */
+        for block in self.blocks.iter() {
+            self.verify_block(block.clone())?;
+        }
+
+        /* Then check the links */
+        for i in 1..self.blocks.len() {
+            if self.blocks[i].header.prev_hash != self.blocks[i-1].header.cur_hash {
+                return Err(IshIshError::PrevHashMismatch);
+            }
+        }
+
         Ok(())
     }
 }
