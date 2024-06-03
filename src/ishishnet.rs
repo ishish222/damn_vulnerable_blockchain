@@ -86,62 +86,9 @@ fn explode(message: &str) -> Option<(&str, &str)> {
     })
 }
 
-
-pub async fn proof_of_work(
-    mut block: IshIshBlock, 
-    difficulty: usize
-    ) -> Result<IshIshBlock, IshIshError> {
-    println!("proof_of_work::start");
-
-    let mut nonce = rand::thread_rng().gen();
-    loop {
-        let mut hasher = Sha256::new();
-        block.header.nonce = nonce;
-
-        let data = serde_json::to_string(&block)?;
-
-        hasher.update(data);
-
-        let hash: [u8; 32] = match hasher.finalize().try_into() {
-            Ok(arr) => arr,
-            Err(_) => return Err(IshIshError::HashConversionFailed), 
-        };
-
-        if hash.iter().take(difficulty).all(|&b| b == 0) {
-            block.header.cur_hash = hash;
-            println!("proof_of_work::finish");
-            return Ok(block);
-        }
-        nonce += 1;
-    }
-}
-
-fn validate_pow(mut block: IshIshBlock, difficulty: usize) -> Result<bool, IshIshError> {
-    let mut hasher = Sha256::new();
-
-    block.header.cur_hash = [0; 32];
-
-    let data = serde_json::to_string(&block)?;
-    hasher.update(data);
-
-    let hash: [u8; 32] = match hasher.finalize().try_into() {
-        Ok(arr) => arr,
-        Err(_) => return Err(IshIshError::HashConversionFailed), 
-    };
-
-    if hash.iter().take(difficulty).all(|&b| b == 0) {
-        block.header.cur_hash = hash;
-        Ok(true)
-    }
-    else {
-        Ok(false)
-    }
-}
-
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IshIshBlockHeader {
-    nonce: u64,
+    pub nonce: u64,
     pub cur_hash: [u8; 32],
     prev_hash: [u8; 32],
 }
@@ -203,7 +150,7 @@ impl IshIshBlockchain {
         self.blocks.push(block);
         Ok(())
     }
-
+    
     fn verify_block(&self, block: IshIshBlock, difficulty: usize) -> Result<(), IshIshError> {
         let pow_ok = validate_pow(block.clone(), difficulty)?;
         
@@ -231,5 +178,27 @@ impl IshIshBlockchain {
     pub fn verify_chain(&self) -> Result<(), IshIshError> {
         // For now I assume its good xD
         Ok(())
+    }
+}
+
+fn validate_pow(mut block: IshIshBlock, difficulty: usize) -> Result<bool, IshIshError> {
+    let mut hasher = Sha256::new();
+
+    block.header.cur_hash = [0; 32];
+
+    let data = serde_json::to_string(&block)?;
+    hasher.update(data);
+
+    let hash: [u8; 32] = match hasher.finalize().try_into() {
+        Ok(arr) => arr,
+        Err(_) => return Err(IshIshError::HashConversionFailed), 
+    };
+
+    if hash.iter().take(difficulty).all(|&b| b == 0) {
+        block.header.cur_hash = hash;
+        Ok(true)
+    }
+    else {
+        Ok(false)
     }
 }

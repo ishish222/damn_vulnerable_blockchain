@@ -30,8 +30,15 @@ mod ishishnet;
 use ishishnet::{
     IshIshBlockchainEvent,
     IshIshBlockchain,
-    proof_of_work,
     IshIshBlock,
+};
+
+mod mining;
+
+use mining::{
+    mining_task,
+    mine_new_block,
+    stop_mining
 };
 
 const DEFAULT_DIFFICULTY : usize = 3;
@@ -43,55 +50,53 @@ struct IshIshClientBehavior {
     mdns: mdns::tokio::Behaviour,
 }
 
-// routine for mining a block
+fn broadcast_new_blockchain(
+    swarm: &mut libp2p::Swarm<IshIshClientBehavior>, 
+    topic: &gossipsub::IdentTopic, 
+    blockchain: &IshIshBlockchain
+) -> Result<(), Box<dyn Error>> {
+    /* Broadcast info about the new blockchain via data availability layer */
+    let mut line = String::from("NBM");
+    let blockchain_serialized = serde_json::to_string(&blockchain)?;
+    line.push_str(&blockchain_serialized);
 
-async fn mining_task(
-    mut rx: mpsc::Receiver<IshIshBlock>, 
-    mut tx: mpsc::Sender<IshIshBlock>, 
-    mut control_rx: watch::Receiver<bool>, 
-    difficulty: usize) 
-    {
-
-    loop {
-        while !*control_rx.borrow() {
-            /* Flush all until signalled */
-            while let Ok(_) = rx.try_recv() {}
-            control_rx.changed().await.unwrap();
-        }
+    println!("Sending line: {line:?}");
     
-        if let Some(block) = rx.recv().await {
-            println!("mining_task: Received block proposition {block:?}");
-            println!("Waiting on mining unlock signal.");
-
-            tokio::select! {
-                _ = control_rx.changed() => {
-                    println!("Received stop signal, terminating mining task.");
-                    continue;
-                }
-                mined_block = async {
-                    proof_of_work(block, difficulty).await
-                } => {
-                    match mined_block {
-                        Ok(mined_block) => {
-                            println!("mining_task: Mined block");
-                            if tx.send(mined_block).await.is_err() {
-                                eprintln!("Failed to send mined block");
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to mine block: {}", e);
-                        }
-                    }
-                }
-            }
-        } else {
-            // If `None` is received, it means all senders have been dropped and no more messages will be sent.
-            println!("No more blocks to receive, terminating mining task.");
-            break;
+    if let Err(e) = swarm
+        .behaviour_mut().gossipsub
+        .publish(topic.clone(), line.as_bytes()) {
+            println!("Publish error: {e:?}");
         }
+    Ok(())
+}
+
+/* consumes both blockchains */
+async fn process_new_blockchain(
+    new_blockchain: IshIshBlockchain, 
+    current_blockchain: IshIshBlockchain, 
+) -> Result<IshIshBlockchain, Box<dyn Error>> {
+
+    println!("Got new blockchain: {new_blockchain:?}, verifying");
+
+    if new_blockchain.blocks.len() > current_blockchain.blocks.len()
+    {
+        println!("Received blockchain is heavier, verifying hashes");
+        match new_blockchain.verify_chain() {
+            Ok(()) => {
+                println!("Verification passed, accepting new blockchain as local");
+                Ok(new_blockchain)
+            }
+            Err(e) => {
+                println!("Blockchain verification failed {e:?}, ignoring");
+                Ok(current_blockchain)
+            }
+        }
+    } else {
+        println!("Received blockchain is lighter, ignoring");
+        Ok(current_blockchain)
     }
 }
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -174,25 +179,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         select! {
             Ok(Some(line)) = stdin.next_line() => {
+
+                /* Here we process commands from stdin */
+
                 match line.as_str() {
                     "start" => {
-                        println!("Starting the local mining thread");
-
-                        if my_blockchain.blocks.len() == 0 {
-                            let first = IshIshBlock::empty_from_content("First".into());
-                            block_tx.send(first).await?;
-                        }
-                        else {
-                            let mined_block = my_blockchain.blocks.last().unwrap();
-                            let new_content = format!("Block number: {}", my_blockchain.blocks.len());
-                            let mut next = IshIshBlock::linked_from_content(
-                                new_content, 
-                                mined_block.header.cur_hash
-                            );
-                            block_tx.send(next).await?;
-                        }
-
-                        control_tx.send(true).unwrap();
+                        println!("Starting mining");
+                        mine_new_block(&my_blockchain, &block_tx, &control_tx).await?
+                    },
+                    "stop" => {
+                        println!("Stopping mining");
+                        stop_mining(&control_tx).await?
                     },
                     _ => {
                         println!("Unknown command: {line}");
@@ -200,6 +197,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             },
             Some(mined_block) = mined_block_rx.recv() => {
+
+                /* Event - we successfuly mined requested block */
+
                 println!("Successfuly mined block: {:?}", mined_block);
 
                 /* Add the new block to my_blockchain */
@@ -207,28 +207,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("Append error: {e:?}");
                 }
 
-                /* Send info about the new blockchain */
-                let mut line = String::from("NBM");
-                let blockchain_serialized = serde_json::to_string(&my_blockchain)?;
-                line.push_str(&blockchain_serialized);
-
-                println!("Sending line: {line:?}");
-                
-                if let Err(e) = swarm
-                    .behaviour_mut().gossipsub
-                    .publish(topic.clone(), line.as_bytes()) {
-                        println!("Publish error: {e:?}");
-                    }
-
-                // Requestng mining new block
-                let new_content = format!("Block number: {}", my_blockchain.blocks.len());
-                let mut next = IshIshBlock::linked_from_content(
-                    new_content, 
-                    mined_block.header.cur_hash
-                );
-                block_tx.send(next).await?;
-
+                /* Broadcast info about the new blockchain via data availability layer */
+                broadcast_new_blockchain(&mut swarm, &topic, &my_blockchain)?;
+                stop_mining(&control_tx).await?;
+                mine_new_block(&my_blockchain, &block_tx, &control_tx).await?;
             },
+
+            /* Processing events from the data availability layer */
             event = swarm.select_next_some() => match event {
                 SwarmEvent::Behaviour(IshIshClientBehaviorEvent::Mdns(mdns::Event::Discovered(list))) => {
                     for (peer_id, _multiaddr) in list {
@@ -249,43 +234,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 })) => {
                     match IshIshBlockchainEvent::try_from(&message.data)? {
                         IshIshBlockchainEvent::NewBlockMined(serialized) => {
-                            
-                            let deserialized: IshIshBlockchain = serde_json::from_str(&serialized)?;
-                            println!("Got new blockchain: {deserialized:?}, verifying");
+                            /* Deserializing */
+                            let new_blockchain: IshIshBlockchain = serde_json::from_str(&serialized)?;
 
-                            if deserialized.blocks.len() > my_blockchain.blocks.len()
-                            {
-                                println!("Received blockchain is heavier, verifying hashes");
-                                match deserialized.verify_chain() {
-                                    Ok(()) => {
-                                        println!("Verification passed, accepting new blockchain as local");
-                                        my_blockchain = deserialized;
+                            /* Processing, consume both and return selected */
+                            my_blockchain = process_new_blockchain(
+                                new_blockchain, 
+                                my_blockchain, 
+                                &block_tx, 
+                                &control_tx
+                            ).await?;
 
-                                        println!("Restarting mining");
-                                        /*  need to restart the mining thread IF mining */
-                                        if *control_tx.borrow() {
-                                            control_tx.send(false).unwrap();
-
-                                            // Requestng mining new block
-                                            let mined_block = my_blockchain.blocks.last().unwrap();
-                                            let new_content = format!("Block number: {}", my_blockchain.blocks.len());
-
-                                            let mut next = IshIshBlock::linked_from_content(
-                                                new_content, 
-                                                mined_block.header.cur_hash
-                                            );
-
-                                            println!("Requesting mining of new block: {next:?}");
-                                            block_tx.send(next).await?;
-
-                                            control_tx.send(true).unwrap();
-                                        }
-                                    }
-                                    Err(e) => {
-                                        println!("Blockchain verification failed, ignoring");
-                                    }
-                                }
-                            }
+                            // Requestng mining new block IF mining
+                            if *control_tx.borrow() {
+                                stop_mining(&control_tx).await?;
+                                mine_new_block(&my_blockchain, &block_tx, &control_tx).await?;
+                            }                            
                         },
                         IshIshBlockchainEvent::SthElse((msg,re)) => {
                             println!("Something else: {msg} {re}");
