@@ -25,7 +25,15 @@ pub enum IshIshError {
     HashConversionFailed,
     InvalidProofOfWork,
     PrevHashMismatch,
-    EmptyBlockchain
+    EmptyBlockchain,
+    RequestedBlockIsNone
+}
+
+pub enum IshIshCommand {
+    MineBlock(IshIshBlock),
+    Start,
+    Restart,
+    Stop
 }
 
 impl Display for IshIshError {

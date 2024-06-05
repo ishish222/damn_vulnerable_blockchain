@@ -31,14 +31,14 @@ use ishishnet::{
     IshIshBlockchainEvent,
     IshIshBlockchain,
     IshIshBlock,
+    IshIshCommand
 };
 
 mod mining;
 
 use mining::{
-    mining_task,
-    mine_new_block,
-    stop_mining
+    propose_block,
+    mining_task
 };
 
 const DEFAULT_DIFFICULTY : usize = 3;
@@ -50,7 +50,7 @@ struct IshIshClientBehavior {
     mdns: mdns::tokio::Behaviour,
 }
 
-fn broadcast_new_blockchain(
+async fn broadcast_new_blockchain(
     swarm: &mut libp2p::Swarm<IshIshClientBehavior>, 
     topic: &gossipsub::IdentTopic, 
     blockchain: &IshIshBlockchain
@@ -71,7 +71,7 @@ fn broadcast_new_blockchain(
 }
 
 /* consumes both blockchains */
-async fn process_new_blockchain(
+fn process_new_blockchain(
     new_blockchain: IshIshBlockchain, 
     current_blockchain: IshIshBlockchain, 
 ) -> Result<IshIshBlockchain, Box<dyn Error>> {
@@ -96,6 +96,7 @@ async fn process_new_blockchain(
         Ok(current_blockchain)
     }
 }
+
 
 
 #[tokio::main]
@@ -158,21 +159,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     /* Local blockchain */
     let mut my_blockchain = IshIshBlockchain::new();
 
-    println!("Starting the local mining thread");
-    let (block_tx, block_rx) = mpsc::channel(10);
-    let (mined_block_tx, mut mined_block_rx) = mpsc::channel(10);
-    let (control_tx, control_rx) = watch::channel(false);
+    println!("Starting the local mining task");
+    let (command_tx, command_rx) = mpsc::channel(100);
+    let (block_tx, mut block_rx) = mpsc::channel(100);
 
     let difficulty: usize = match std::env::args().nth(1)
     {
         Some(v) => v.parse::<usize>().unwrap(),
         None => DEFAULT_DIFFICULTY as usize
     };
-    
-    tokio::spawn(mining_task(
-        block_rx, 
-        mined_block_tx, 
-        control_rx));
+
+    tokio::spawn(mining_task(command_rx, block_tx));
+
+    let genesis = propose_block(&my_blockchain, difficulty).await?;
+    command_tx.send(IshIshCommand::MineBlock(genesis)).await?;
 
     // Kick it off
     loop {
@@ -183,19 +183,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 match line.as_str() {
                     "start" => {
-                        println!("Starting mining");
-                        mine_new_block(&my_blockchain, &block_tx, &control_tx, difficulty).await?
+                        command_tx.send(IshIshCommand::Start).await?;
                     },
                     "stop" => {
-                        println!("Stopping mining");
-                        stop_mining(&control_tx).await?
+                        command_tx.send(IshIshCommand::Stop).await?;
                     },
                     _ => {
                         println!("Unknown command: {line}");
                     }
                 }
             },
-            Some(mined_block) = mined_block_rx.recv() => {
+            Some(mined_block) = block_rx.recv() => {
 
                 /* Event - we successfuly mined requested block */
 
@@ -206,10 +204,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     println!("Append error: {e:?}");
                 }
 
-                /* Broadcast info about the new blockchain via data availability layer */
-                broadcast_new_blockchain(&mut swarm, &topic, &my_blockchain)?;
-                stop_mining(&control_tx).await?;
-                mine_new_block(&my_blockchain, &block_tx, &control_tx, difficulty).await?;
+                /* Get block proposition */
+                let new_block = propose_block(&my_blockchain, difficulty).await?;
+
+                /* Send the command w/ new proposition */
+                command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
+
+                /* We broadcast info about the new blockchain via data availability layer */
+                broadcast_new_blockchain(&mut swarm, &topic, &my_blockchain).await?;
             },
 
             /* Processing events from the data availability layer */
@@ -240,13 +242,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             my_blockchain = process_new_blockchain(
                                 new_blockchain, 
                                 my_blockchain
-                            ).await?;
+                            )?;
 
-                            // Requestng mining new block IF mining
-                            if *control_tx.borrow() {
-                                stop_mining(&control_tx).await?;
-                                mine_new_block(&my_blockchain, &block_tx, &control_tx, difficulty).await?;
-                            }                            
+                            /* Get block proposition */
+                            let new_block = propose_block(&my_blockchain, difficulty).await?;
+
+                            /* Send the command w/ new proposition */
+                            command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
                         },
                         IshIshBlockchainEvent::SthElse((msg,re)) => {
                             println!("Something else: {msg} {re}");

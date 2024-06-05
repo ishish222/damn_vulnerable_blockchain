@@ -14,10 +14,11 @@ use tokio::sync::{
 use crate::ishishnet::{
     IshIshBlock, 
     IshIshBlockchain, 
-    IshIshError
+    IshIshError,
+    IshIshCommand
 };
 
-pub async fn proof_of_work(
+pub fn proof_of_work(
     mut block: IshIshBlock, 
     difficulty: usize
     ) -> Result<IshIshBlock, IshIshError> {
@@ -47,72 +48,67 @@ pub async fn proof_of_work(
 }
 
 pub async fn mining_task(
-    mut rx: mpsc::Receiver<IshIshBlock>, 
-    mut tx: mpsc::Sender<IshIshBlock>, 
-    mut control_rx: watch::Receiver<bool>
-    ) 
-    {
+    mut command_rx: mpsc::Receiver<IshIshCommand>,
+    mut block_tx: mpsc::Sender<IshIshBlock>
+    ) -> Result<(), IshIshError> {
 
-    loop {
-        while let Ok(_) = rx.try_recv() {}
-        println!("mining_task: Waiting for start signal.");
-        control_rx.changed().await.unwrap();
+    let mut current_block: Option<IshIshBlock> = None;
+    let mut running = false;
     
-        if let Some(block) = rx.recv().await {
-            println!("mining_task: Received block proposition {block:?}");
-            println!("mining_task: Received start signal, commencing mining");
-
-            tokio::select! {
-                _ = control_rx.changed() => {
-                    println!("Mining interrupted.");
+    loop {
+        tokio::select! {
+            cmd = command_rx.recv() => {
+                match cmd {
+                    Some(IshIshCommand::MineBlock(block)) => {
+                        println!("mining_task::Updating current_block");
+                        current_block = Some(block);
+                    },
+                    Some(IshIshCommand::Stop) => {
+                        println!("mining_task::Stopping mining");
+                        running = false;
+                    },
+                    Some(IshIshCommand::Start) => {
+                        println!("mining_task::Starting mining");
+                        running = true;
+                    },
+                    Some(IshIshCommand::Restart) => {
+                        println!("mining_task::Restarting mining");
+                        running = true;
+                    },
+                    None => {}
                 }
-                mined_block = async {
-                    let difficulty = block.header.difficulty;
-                    proof_of_work(block, difficulty).await
-                } => {
-                    match mined_block {
-                        Ok(mined_block) => {
-                            println!("mining_task: Mined block");
-                            if tx.send(mined_block).await.is_err() {
-                                eprintln!("Failed to send mined block");
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to mine block: {}", e);
-                        }
-                    }
+            },
+            mined_block = async {
+                if !running || current_block.is_none() {
+                    return None // kill this async
+                }
+
+                println!("Starting the mining for a new block");
+                let block = current_block.clone().unwrap();
+                let difficulty = block.header.difficulty;
+                Some(proof_of_work(block, difficulty).ok()?)
+            } => {
+                match mined_block {
+                    Some(mined_block) => {
+                        println!("mining_task: Mined block");
+                        block_tx.send(mined_block).await;
+                        current_block = None;
+                    },
+                    None => {}
                 }
             }
-        } else {
-            // If `None` is received, it means all senders have been dropped and no more messages will be sent.
-            println!("No more blocks to receive, terminating mining task.");
-            break;
         }
     }
 }
 
-pub async fn stop_mining(
-    control_tx: &watch::Sender<bool>
-) -> Result<(), Box<dyn std::error::Error>> {
-    
-    println!("Stopping mining");
-
-    control_tx.send(false).unwrap();
-    Ok(())
-}
-
-pub async fn mine_new_block(
+pub async fn propose_block(
     blockchain: &IshIshBlockchain,
-    block_tx: &mpsc::Sender<IshIshBlock>,
-    control_tx: &watch::Sender<bool>,
     difficulty: usize
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<IshIshBlock, Box<dyn std::error::Error>> {
     
-    println!("Building & sending block proposal");
+    println!("Building a block proposal");
     if blockchain.blocks.len() == 0 {
-        let first = IshIshBlock::empty_from_content("First".into(), difficulty);
-        block_tx.send(first).await?;
+        Ok(IshIshBlock::empty_from_content("Genesis".into(), difficulty))
     }
     else {
         let mined_block = blockchain.blocks.last().unwrap();
@@ -122,10 +118,6 @@ pub async fn mine_new_block(
             mined_block.header.cur_hash,
             difficulty
         );
-        block_tx.send(next).await?;
+        Ok(next)
     }
-
-    println!("Signalling mining start");
-    control_tx.send(true).unwrap();
-    Ok(())
 }
