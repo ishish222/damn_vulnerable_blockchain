@@ -11,7 +11,7 @@ use tokio::sync::{
     watch
 };
 
-use crate::ishishnet::{
+use crate::blockchain::{
     IshIshBlock, 
     IshIshBlockchain, 
     IshIshError,

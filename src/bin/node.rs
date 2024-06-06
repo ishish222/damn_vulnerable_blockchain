@@ -23,20 +23,17 @@ use tokio::{
 use tracing_subscriber::EnvFilter;
 
 use tokio::sync::mpsc;
-use tokio::sync::watch;
 
-mod ishishnet;
-
-use ishishnet::{
+use ishishnet::blockchain::{
     IshIshBlockchainEvent,
     IshIshBlockchain,
     IshIshBlock,
     IshIshCommand
 };
 
-mod mining;
+use alloy::signers::wallet::{Wallet, LocalWallet};
 
-use mining::{
+use ishishnet::mining::{
     propose_block,
     mining_task
 };
@@ -97,10 +94,26 @@ fn process_new_blockchain(
     }
 }
 
+use ishishnet::utils::{
+    ensure_ishish_home,
+    ISHISH_HOME
+};
 
+use std::env;
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+
+    /* setup wallet dir path */
+    let mut path = PathBuf::new();
+    let home_dir = env::var_os("HOME").expect("HOME is not set in env.");
+    path.push(home_dir);
+    ensure_ishish_home(&path).await?;
+    
+    path.push(ISHISH_HOME);
+    println!("Home dir: {}", path.display());
+    
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .try_init();
@@ -174,19 +187,53 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let genesis = propose_block(&my_blockchain, difficulty).await?;
     command_tx.send(IshIshCommand::MineBlock(genesis)).await?;
 
+    let mut current_signer: Option<LocalWallet> = None;
+
     // Kick it off
     loop {
         select! {
             Ok(Some(line)) = stdin.next_line() => {
-
+                let line = line.trim();
                 /* Here we process commands from stdin */
 
-                match line.as_str() {
+                println!("Received line: {line}");
+
+                match line {
                     "start" => {
                         command_tx.send(IshIshCommand::Start).await?;
                     },
                     "stop" => {
                         command_tx.send(IshIshCommand::Stop).await?;
+                    },
+                    "open" => {
+                        println!("Enter the name of the wallet [default]");
+                        let mut wallet_name = String::new();
+                        //let mut wallet_name = stdin.next_line().await.unwrap().unwrap();
+                        std::io::stdin().read_line(&mut wallet_name).expect("Failed to read line");
+                        if wallet_name.trim().is_empty() {
+                            wallet_name = "default".to_string();
+                        }
+                        
+                        println!("Please enter a password for the wallet");
+                        let mut password = String::new();
+                        //let mut password = stdin.next_line().await.unwrap().unwrap();
+                        std::io::stdin().read_line(&mut password).expect("Failed to read line");
+
+                        let mut full_path = path.clone();
+                        full_path.push(&wallet_name.trim());
+
+                        println!("Opening wallet: {}", full_path.display());
+                        current_signer = match Wallet::decrypt_keystore(full_path, password) {
+                            Ok(wallet) => {
+                                println!("Opened wallet: {}", wallet.address());
+                                Some(wallet)
+                            },
+                            Err(e) => {
+                                println!("Failed to open wallet: {e:?}");
+                                None
+                            }
+                        }
+
                     },
                     _ => {
                         println!("Unknown command: {line}");

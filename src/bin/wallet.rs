@@ -32,17 +32,10 @@ enum Commands {
 use std::env;
 use std::path::{Path, PathBuf};
 
-const ISHISH_HOME: &str = ".ishish";
-
-async fn ensure_ishish_home(
-    path: &PathBuf
-) -> Result<(), Box<dyn Error>> {
-    if !path.exists() {
-        println!("Creating ishish home dir");
-        fs::create_dir_all(&path).expect("Failed to create ishish home dir");
-    }
-    Ok(())
-}
+use ishishnet::utils::{
+    ensure_ishish_home,
+    ISHISH_HOME
+};
 
 async fn create_new_wallet(
     path: &PathBuf,
