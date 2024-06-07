@@ -12,10 +12,7 @@ use tokio::sync::{
 };
 
 use crate::blockchain::{
-    IshIshBlock, 
-    IshIshBlockchain, 
-    IshIshError,
-    IshIshCommand
+    IshIshBlock, IshIshBlockchain, IshIshCommand, IshIshError, IshIshTransaction
 };
 
 use alloy::primitives::{
@@ -108,20 +105,21 @@ pub async fn mining_task(
 pub async fn propose_block(
     coinbase: Address, 
     blockchain: &IshIshBlockchain,
-    difficulty: usize
+    difficulty: usize,
+    transactions: &mut Vec<IshIshTransaction>
 ) -> Result<IshIshBlock, Box<dyn std::error::Error>> {
     
     println!("Building a block proposal");
     if blockchain.blocks.len() == 0 {
-        Ok(IshIshBlock::empty_from_content(coinbase,"Genesis".into(), difficulty))
+        Ok(IshIshBlock::no_prev(coinbase, transactions, difficulty))
     }
     else {
         let mined_block = blockchain.blocks.last().unwrap();
-        let new_content = format!("Block number: {}", blockchain.blocks.len());
-        let next = IshIshBlock::linked_from_content(
+        
+        let next = IshIshBlock::from_prev_block(
             coinbase,
-            new_content, 
-            mined_block.header.cur_hash,
+            transactions, 
+            &mined_block,
             difficulty
         );
         Ok(next)

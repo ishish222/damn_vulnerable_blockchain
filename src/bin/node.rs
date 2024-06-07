@@ -26,7 +26,7 @@ use tracing_subscriber::EnvFilter;
 use tokio::sync::mpsc;
 
 use ishishnet::blockchain::{
-    IshIshBlock, IshIshBlockchain, IshIshBlockchainEvent, IshIshCommand, IshIshError
+    IshIshBlock, IshIshBlockchain, IshIshBlockchainEvent, IshIshCommand, IshIshError, IshIshTransaction
 };
 
 use alloy::signers::wallet::{Wallet, LocalWallet};
@@ -46,7 +46,7 @@ use ishishnet::mining::{
 use revm::{
     db::{CacheDB, EmptyDB, InMemoryDB, DbAccount, },
     primitives::{AccountInfo},
-    //EVM,
+    Evm,
 };
 
 const DEFAULT_DIFFICULTY : usize = 3;
@@ -67,6 +67,26 @@ async fn broadcast_new_blockchain(
     let mut line = String::from("NBM");
     let blockchain_serialized = serde_json::to_string(&blockchain)?;
     line.push_str(&blockchain_serialized);
+
+    println!("Sending line: {line:?}");
+    
+    if let Err(e) = swarm
+        .behaviour_mut().gossipsub
+        .publish(topic.clone(), line.as_bytes()) {
+            println!("Publish error: {e:?}");
+        }
+    Ok(())
+}
+
+async fn broadcast_new_transaction(
+    swarm: &mut libp2p::Swarm<IshIshClientBehavior>, 
+    topic: &gossipsub::IdentTopic, 
+    transaction: &IshIshTransaction
+) -> Result<(), Box<dyn Error>> {
+    /* Broadcast info about the new blockchain via data availability layer */
+    let mut line = String::from("TRA");
+    let transaction_serialized = serde_json::to_string(&transaction)?;
+    line.push_str(&transaction_serialized);
 
     println!("Sending line: {line:?}");
     
@@ -105,14 +125,11 @@ fn process_new_blockchain(
     }
 }
 
-fn progress_state(db: &mut InMemoryDB, block: &IshIshBlock) {
+fn progress_state(db: &mut InMemoryDB, block: &IshIshBlock, my_transactions: &mut Vec<IshIshTransaction>) {
     /* reward coinbase */
     let coinbase = block.header.coinbase;
 
-    //let acc_info = db.load_account(coinbase).unwrap();
     let mut acc_info = AccountInfo::default();
-    //let mut acc_info = AccountInfo::default();
-
     {
         let db_acc = db.load_account(coinbase).unwrap();
         acc_info = db_acc.info.clone();
@@ -123,6 +140,46 @@ fn progress_state(db: &mut InMemoryDB, block: &IshIshBlock) {
     println!("Updated balance for {}: {:?}", coinbase, new_acc_info);
     
     db.insert_account_info(coinbase, new_acc_info);
+
+    /* process transactions */
+    for tx in block.content.iter() {
+        let from = tx.from;
+        let to = tx.to;
+        let amount = tx.amount;
+
+        let mut from_acc_info = AccountInfo::default();
+        {
+            let db_acc = db.load_account(from).unwrap();
+            from_acc_info = db_acc.info.clone();
+        } // drop db_acc so that mut ref can be taken again
+
+        let mut to_acc_info = AccountInfo::default();
+        {
+            let db_acc = db.load_account(to).unwrap();
+            to_acc_info = db_acc.info.clone();
+        } // drop db_acc so that mut ref can be taken again
+
+        let mut new_from_acc_info = from_acc_info.clone();
+        new_from_acc_info.balance = from_acc_info.balance - U256::from(amount);
+        println!("Updated balance for {}: {:?}", from, new_from_acc_info);
+        
+        let mut new_to_acc_info = to_acc_info.clone();
+        new_to_acc_info.balance = to_acc_info.balance + U256::from(amount);
+        println!("Updated balance for {}: {:?}", to, new_to_acc_info);
+
+        db.insert_account_info(from, new_from_acc_info);
+        db.insert_account_info(to, new_to_acc_info);
+
+        /* Remove the transaction from the pool */
+        for (i, my_txs) in my_transactions.iter().enumerate() {
+            if my_txs == tx {
+                my_transactions.remove(i);
+                println!("Removed transaction {:?} local pool", tx);
+                println!("Current pool: {:?}", my_transactions);
+                break;
+            }
+        }
+    }
 }
 
 fn get_balance(db: &mut InMemoryDB, address: Address) -> u64 {
@@ -132,9 +189,9 @@ fn get_balance(db: &mut InMemoryDB, address: Address) -> u64 {
     balance.to::<u64>()
 }
 
-fn refresh_state(db: &mut InMemoryDB, chain: &IshIshBlockchain) {
+fn refresh_state(db: &mut InMemoryDB, chain: &IshIshBlockchain, my_transactions: &mut Vec<IshIshTransaction>) {
     for block in chain.blocks.iter() {
-        progress_state(db, block);
+        progress_state(db, block, my_transactions);
     }
 }
 
@@ -216,6 +273,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     /* Local state */
     let mut my_state = CacheDB::new(EmptyDB::default());
 
+    /* Local EVM */
+    let mut my_evm = Evm::builder().with_db(my_state).build();
+    let mut my_transactions: Vec<IshIshTransaction> = Vec::new();
+
     /* Local blockchain */
     let mut my_blockchain = IshIshBlockchain::new();
 
@@ -249,7 +310,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             Some(signer) => {
 
                                 /* Get block proposition */
-                                let new_block = propose_block(signer.address(), &my_blockchain, difficulty).await?;                                
+                                let new_block = propose_block(signer.address(), &my_blockchain, difficulty, &mut my_transactions).await?;                                
                                 command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
                                 command_tx.send(IshIshCommand::Start).await?;
                             },
@@ -299,14 +360,65 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         std::io::stdin().read_line(&mut address).expect("Failed to read line");
                         if address.trim().is_empty() {
                             let address = current_signer.clone().unwrap().address();
-                            println!("Balance of {address}: {}", get_balance(&mut my_state, address));
+                            println!("Balance of {address}: {}", get_balance(my_evm.db_mut(), address));
                         } else {
                             let checksummed = address.trim();
                             let address = Address::parse_checksummed(checksummed, None).expect("valid checksum");
                             
-                            println!("Balance of {address}: {}", get_balance(&mut my_state, address));
+                            println!("Balance of {address}: {}", get_balance(my_evm.db_mut(), address));
+                        }
+                    },                    
+                    "print_pool" => {
+                        println!("Current pool: {:?}", my_transactions);
+                    },
+                    "send_ish" => {
+                        let mut read_str = String::new();
+                        let mut src = Address::new([0x0; 20]);
+                        let mut dst = Address::new([0x0; 20]);
+
+                        println!("Enter the name of the source wallet [coinbase]");
+                        std::io::stdin().read_line(&mut read_str).expect("Failed to read line");
+                        if read_str.trim().is_empty() {
+                            src = current_signer.clone().unwrap().address();
+
+                        } else {
+                            let checksummed = read_str.trim();
+                            src = Address::parse_checksummed(checksummed, None).expect("valid checksum");
                         }
 
+                        println!("Enter the target wallet");
+                        read_str.clear();
+                        std::io::stdin().read_line(&mut read_str).expect("Failed to read line");
+                        if read_str.trim().is_empty() {
+                            dst = current_signer.clone().unwrap().address();
+
+                        } else {
+                            let checksummed = read_str.trim();
+                            dst = Address::parse_checksummed(checksummed, None).expect("valid checksum");
+                        }
+
+                        println!("How much ish to send?");
+                        read_str.clear();
+                        std::io::stdin().read_line(&mut read_str).expect("Failed to read line");
+                        let read_str = read_str.trim();
+                        println!("Trying to cenvert {read_str} to u64");
+                        let amount = read_str.trim().parse::<u64>().unwrap();
+
+                        println!("Sending {amount} ish from {src} to {dst}");
+                        /* Prepare the transaction */
+                        let transaction = IshIshTransaction {
+                            from: src,
+                            to: dst,
+                            amount: amount,
+                        };
+
+                        /* Broadcast the transaction */
+                        broadcast_new_transaction(&mut swarm, &topic, &transaction).await?;
+
+                        /* Add to local pool */
+                        my_transactions.push(transaction);
+                        println!("Transaction added to local pool");
+                        println!("Current pool: {:?}", my_transactions);
                     },
                     _ => {
                         println!("Unknown command: {line}");
@@ -318,7 +430,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 /* Event - we successfuly mined requested block */
 
                 println!("Successfuly mined block: {:?}", mined_block);
-                progress_state(&mut my_state, &mined_block);
+                progress_state(my_evm.db_mut(), &mined_block, &mut my_transactions);
 
                 /* Add the new block to my_blockchain */
                 if let Err(e) = my_blockchain.append(mined_block.clone()) {
@@ -327,7 +439,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 /* Get block proposition */
                 let signer = current_signer.clone().unwrap();
-                let new_block = propose_block(signer.address(), &my_blockchain, difficulty).await?;   
+                let new_block = propose_block(signer.address(), &my_blockchain, difficulty, &mut my_transactions).await?;      
 
                 /* Send the command w/ new proposition */
                 command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
@@ -368,7 +480,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                             /* We need to recreate the internal state */
                             my_state = CacheDB::new(EmptyDB::default());
-                            refresh_state(&mut my_state, &my_blockchain);
+                            my_evm = Evm::builder().with_db(my_state).build();
+                            refresh_state(&mut my_evm.db_mut(), &my_blockchain, &mut my_transactions);
 
                             /* Get block proposition */
                             let signer = current_signer.clone();
@@ -376,7 +489,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 Some(signer) => {
     
                                     /* Get block proposition */
-                                    let new_block = propose_block(signer.address(), &my_blockchain, difficulty).await?;                                
+                                    let new_block = propose_block(signer.address(), &my_blockchain, difficulty, &mut my_transactions).await?;                                    
                                     command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
                                     /* We just update the block, we don't start because we don't know the mining status */
                                 },
@@ -384,6 +497,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     println!("No wallet opened, can't propose block");
                                 }
                             };
+                        },
+                        IshIshBlockchainEvent::NewSignedTransaction(transaction_str) => {
+                            let transaction: IshIshTransaction = serde_json::from_str(&transaction_str)?;
+
+                            println!("Got new transaction: {:?}", transaction);
+
+                            /* Add to local pool */
+                            my_transactions.push(transaction);
+                            println!("Transaction added to local pool");
+                            println!("Current pool: {:?}", my_transactions);
+
                         },
                         IshIshBlockchainEvent::SthElse((msg,re)) => {
                             println!("Something else: {msg} {re}");

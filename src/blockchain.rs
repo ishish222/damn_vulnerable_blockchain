@@ -64,7 +64,8 @@ impl From<serde_json::Error> for IshIshError {
 
 pub enum IshIshBlockchainEvent<'a> {
     NewBlockMined(&'a str),
-    SthElse((&'a str, &'a str))
+    SthElse((&'a str, &'a str)),
+    NewSignedTransaction(&'a str),
 }
 
 impl<'a> TryFrom<&'a Vec<u8>> for IshIshBlockchainEvent<'a> {
@@ -83,25 +84,25 @@ impl<'a> TryFrom<&'a Vec<u8>> for IshIshBlockchainEvent<'a> {
             "NBM" => {
                 return Ok(IshIshBlockchainEvent::NewBlockMined(message))
             },
+            "TRA" => {
+                return Ok(IshIshBlockchainEvent::NewSignedTransaction(message))
+            },
             _ => return Ok(IshIshBlockchainEvent::SthElse((header, message)))
         }
     }
 }
 
-fn explode(message: &str) -> Option<(&str, &str)> {
-    message.chars().enumerate().find_map(|(i, c)| { 
-        if c == ' ' {
-            Some((&message[..i], &message[i+1..]))
-        }
-        else {
-            Some((&message[..], ""))
-        }
-    })
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct IshIshTransaction {
+    pub from: Address,
+    pub to: Address,
+    pub amount: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IshIshBlockHeader {
     pub coinbase: Address,
+    pub number: u64,
     pub nonce: u64,
     pub difficulty: usize,
     pub cur_hash: [u8; 32],
@@ -109,9 +110,10 @@ pub struct IshIshBlockHeader {
 }
 
 impl IshIshBlockHeader {
-    pub fn empty(coinbase: Address, difficulty: usize) -> Self {
+    pub fn no_prev(coinbase: Address, difficulty: usize) -> Self {
         Self {
             coinbase: coinbase,
+            number: 0,
             nonce: 0,
             difficulty: difficulty,
             cur_hash: [0; 32],
@@ -119,13 +121,14 @@ impl IshIshBlockHeader {
         }
     }
 
-    pub fn from_prev_hash(coinbase: Address, prev_hash: [u8; 32], difficulty: usize) -> Self {
+    pub fn from_prev_block(coinbase: Address, prev_block: &IshIshBlock, difficulty: usize) -> Self {
         Self {
             coinbase: coinbase,
+            number: prev_block.header.number + 1,
             nonce: 0,
             difficulty: difficulty,            
             cur_hash: [0; 32],
-            prev_hash: prev_hash
+            prev_hash: prev_block.header.cur_hash
         }
     }
 }
@@ -133,20 +136,36 @@ impl IshIshBlockHeader {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IshIshBlock {
     pub header: IshIshBlockHeader,
-    content: String,
+    pub content: Vec<IshIshTransaction>,
 }
 
 impl IshIshBlock {
-    pub fn empty_from_content(coinbase: Address, content: String, difficulty: usize) -> Self {
+    pub fn no_prev(coinbase: Address, transactions: &mut Vec<IshIshTransaction>, difficulty: usize) -> Self {
+        let mut content = Vec::new();
+
+        /* We include at most top 3 transactions */
+        let num_transactions = transactions.len().min(3);
+        for i in 0..num_transactions {
+            content.push(transactions[i].clone());
+        }
+        
         Self {
-            header: IshIshBlockHeader::empty(coinbase, difficulty),
+            header: IshIshBlockHeader::no_prev(coinbase, difficulty),
             content: content
         }
     }
 
-    pub fn linked_from_content(coinbase: Address, content: String, prev_hash: [u8; 32], difficulty: usize) -> Self {
+    pub fn from_prev_block(coinbase: Address, transactions: &mut Vec<IshIshTransaction>, prev_block: &IshIshBlock, difficulty: usize) -> Self {
+        let mut content = Vec::new();
+        
+        /* We include at most top 3 transactions */
+        let num_transactions = transactions.len().min(3);
+        for i in 0..num_transactions {
+            content.push(transactions[i].clone());
+        }
+        
         Self {
-            header: IshIshBlockHeader::from_prev_hash(coinbase, prev_hash, difficulty),
+            header: IshIshBlockHeader::from_prev_block(coinbase, prev_block, difficulty),
             content: content
         }
     }
