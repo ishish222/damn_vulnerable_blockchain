@@ -1,3 +1,4 @@
+
 use futures::stream::StreamExt;
 use libp2p::{
     gossipsub, 
@@ -25,17 +26,27 @@ use tracing_subscriber::EnvFilter;
 use tokio::sync::mpsc;
 
 use ishishnet::blockchain::{
-    IshIshBlockchainEvent,
-    IshIshBlockchain,
-    IshIshBlock,
-    IshIshCommand
+    IshIshBlock, IshIshBlockchain, IshIshBlockchainEvent, IshIshCommand, IshIshError
 };
 
 use alloy::signers::wallet::{Wallet, LocalWallet};
+use alloy::primitives::{
+    Address,
+    address,
+    U256,
+    utils::format_units,
+    
+};
 
 use ishishnet::mining::{
     propose_block,
     mining_task
+};
+
+use revm::{
+    db::{CacheDB, EmptyDB, InMemoryDB, DbAccount, },
+    primitives::{AccountInfo},
+    //EVM,
 };
 
 const DEFAULT_DIFFICULTY : usize = 3;
@@ -78,7 +89,7 @@ fn process_new_blockchain(
     if new_blockchain.blocks.len() > current_blockchain.blocks.len()
     {
         println!("Received blockchain is heavier, verifying hashes");
-        match new_blockchain.verify_chain() {
+        match IshIshBlockchain::verify_chain(&new_blockchain) {
             Ok(()) => {
                 println!("Verification passed, accepting new blockchain as local");
                 Ok(new_blockchain)
@@ -93,6 +104,40 @@ fn process_new_blockchain(
         Ok(current_blockchain)
     }
 }
+
+fn progress_state(db: &mut InMemoryDB, block: &IshIshBlock) {
+    /* reward coinbase */
+    let coinbase = block.header.coinbase;
+
+    //let acc_info = db.load_account(coinbase).unwrap();
+    let mut acc_info = AccountInfo::default();
+    //let mut acc_info = AccountInfo::default();
+
+    {
+        let db_acc = db.load_account(coinbase).unwrap();
+        acc_info = db_acc.info.clone();
+    } // drop db_acc so that mut ref can be taken again
+    
+    let mut new_acc_info = acc_info.clone();
+    new_acc_info.balance = acc_info.balance + U256::from(1);
+    println!("Updated balance for {}: {:?}", coinbase, new_acc_info);
+    
+    db.insert_account_info(coinbase, new_acc_info);
+}
+
+fn get_balance(db: &mut InMemoryDB, address: Address) -> u64 {
+    let db_acc = db.load_account(address).unwrap();
+    let acc_info = &db_acc.info;
+    let balance = acc_info.balance;
+    balance.to::<u64>()
+}
+
+fn refresh_state(db: &mut InMemoryDB, chain: &IshIshBlockchain) {
+    for block in chain.blocks.iter() {
+        progress_state(db, block);
+    }
+}
+
 
 use ishishnet::utils::{
     ensure_ishish_home,
@@ -168,6 +213,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Listen on all interfaces and whatever port the OS assigns
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
+    /* Local state */
+    let mut my_state = CacheDB::new(EmptyDB::default());
 
     /* Local blockchain */
     let mut my_blockchain = IshIshBlockchain::new();
@@ -184,9 +231,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     tokio::spawn(mining_task(command_rx, block_tx));
 
-    let genesis = propose_block(&my_blockchain, difficulty).await?;
-    command_tx.send(IshIshCommand::MineBlock(genesis)).await?;
-
     let mut current_signer: Option<LocalWallet> = None;
 
     // Kick it off
@@ -200,7 +244,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
                 match line {
                     "start" => {
-                        command_tx.send(IshIshCommand::Start).await?;
+                        let signer = current_signer.clone();
+                        match signer {
+                            Some(signer) => {
+
+                                /* Get block proposition */
+                                let new_block = propose_block(signer.address(), &my_blockchain, difficulty).await?;                                
+                                command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
+                                command_tx.send(IshIshCommand::Start).await?;
+                            },
+                            None => {
+                                println!("Please open a wallet first");
+                            }
+                        };
+                        
                     },
                     "stop" => {
                         command_tx.send(IshIshCommand::Stop).await?;
@@ -235,6 +292,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
 
                     },
+                    "get_balance" => {
+                        println!("Enter the name of the wallet [coinbase]");
+                        let mut address = String::new();
+                        //let mut wallet_name = stdin.next_line().await.unwrap().unwrap();
+                        std::io::stdin().read_line(&mut address).expect("Failed to read line");
+                        if address.trim().is_empty() {
+                            let address = current_signer.clone().unwrap().address();
+                            println!("Balance of {address}: {}", get_balance(&mut my_state, address));
+                        } else {
+                            let checksummed = address.trim();
+                            let address = Address::parse_checksummed(checksummed, None).expect("valid checksum");
+                            
+                            println!("Balance of {address}: {}", get_balance(&mut my_state, address));
+                        }
+
+                    },
                     _ => {
                         println!("Unknown command: {line}");
                     }
@@ -245,6 +318,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 /* Event - we successfuly mined requested block */
 
                 println!("Successfuly mined block: {:?}", mined_block);
+                progress_state(&mut my_state, &mined_block);
 
                 /* Add the new block to my_blockchain */
                 if let Err(e) = my_blockchain.append(mined_block.clone()) {
@@ -252,7 +326,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 /* Get block proposition */
-                let new_block = propose_block(&my_blockchain, difficulty).await?;
+                let signer = current_signer.clone().unwrap();
+                let new_block = propose_block(signer.address(), &my_blockchain, difficulty).await?;   
 
                 /* Send the command w/ new proposition */
                 command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
@@ -291,11 +366,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 my_blockchain
                             )?;
 
-                            /* Get block proposition */
-                            let new_block = propose_block(&my_blockchain, difficulty).await?;
+                            /* We need to recreate the internal state */
+                            my_state = CacheDB::new(EmptyDB::default());
+                            refresh_state(&mut my_state, &my_blockchain);
 
-                            /* Send the command w/ new proposition */
-                            command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
+                            /* Get block proposition */
+                            let signer = current_signer.clone();
+                            match signer {
+                                Some(signer) => {
+    
+                                    /* Get block proposition */
+                                    let new_block = propose_block(signer.address(), &my_blockchain, difficulty).await?;                                
+                                    command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
+                                    /* We just update the block, we don't start because we don't know the mining status */
+                                },
+                                None => {
+                                    println!("No wallet opened, can't propose block");
+                                }
+                            };
                         },
                         IshIshBlockchainEvent::SthElse((msg,re)) => {
                             println!("Something else: {msg} {re}");

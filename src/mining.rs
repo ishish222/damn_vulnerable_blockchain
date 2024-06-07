@@ -18,6 +18,10 @@ use crate::blockchain::{
     IshIshCommand
 };
 
+use alloy::primitives::{
+    Address,
+};
+
 pub fn proof_of_work(
     mut block: IshIshBlock, 
     difficulty: usize
@@ -102,18 +106,20 @@ pub async fn mining_task(
 }
 
 pub async fn propose_block(
+    coinbase: Address, 
     blockchain: &IshIshBlockchain,
     difficulty: usize
 ) -> Result<IshIshBlock, Box<dyn std::error::Error>> {
     
     println!("Building a block proposal");
     if blockchain.blocks.len() == 0 {
-        Ok(IshIshBlock::empty_from_content("Genesis".into(), difficulty))
+        Ok(IshIshBlock::empty_from_content(coinbase,"Genesis".into(), difficulty))
     }
     else {
         let mined_block = blockchain.blocks.last().unwrap();
         let new_content = format!("Block number: {}", blockchain.blocks.len());
         let next = IshIshBlock::linked_from_content(
+            coinbase,
             new_content, 
             mined_block.header.cur_hash,
             difficulty

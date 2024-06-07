@@ -29,6 +29,10 @@ pub enum IshIshError {
     RequestedBlockIsNone
 }
 
+use alloy::primitives::{
+    Address,
+};
+
 pub enum IshIshCommand {
     MineBlock(IshIshBlock),
     Start,
@@ -97,6 +101,7 @@ fn explode(message: &str) -> Option<(&str, &str)> {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct IshIshBlockHeader {
+    pub coinbase: Address,
     pub nonce: u64,
     pub difficulty: usize,
     pub cur_hash: [u8; 32],
@@ -104,8 +109,9 @@ pub struct IshIshBlockHeader {
 }
 
 impl IshIshBlockHeader {
-    pub fn empty(difficulty: usize) -> Self {
+    pub fn empty(coinbase: Address, difficulty: usize) -> Self {
         Self {
+            coinbase: coinbase,
             nonce: 0,
             difficulty: difficulty,
             cur_hash: [0; 32],
@@ -113,8 +119,9 @@ impl IshIshBlockHeader {
         }
     }
 
-    pub fn from_prev_hash(prev_hash: [u8; 32], difficulty: usize) -> Self {
+    pub fn from_prev_hash(coinbase: Address, prev_hash: [u8; 32], difficulty: usize) -> Self {
         Self {
+            coinbase: coinbase,
             nonce: 0,
             difficulty: difficulty,            
             cur_hash: [0; 32],
@@ -130,16 +137,16 @@ pub struct IshIshBlock {
 }
 
 impl IshIshBlock {
-    pub fn empty_from_content(content: String, difficulty: usize) -> Self {
+    pub fn empty_from_content(coinbase: Address, content: String, difficulty: usize) -> Self {
         Self {
-            header: IshIshBlockHeader::empty(difficulty),
+            header: IshIshBlockHeader::empty(coinbase, difficulty),
             content: content
         }
     }
 
-    pub fn linked_from_content(content: String, prev_hash: [u8; 32], difficulty: usize) -> Self {
+    pub fn linked_from_content(coinbase: Address, content: String, prev_hash: [u8; 32], difficulty: usize) -> Self {
         Self {
-            header: IshIshBlockHeader::from_prev_hash(prev_hash, difficulty),
+            header: IshIshBlockHeader::from_prev_hash(coinbase, prev_hash, difficulty),
             content: content
         }
     }
@@ -157,8 +164,9 @@ impl IshIshBlockchain {
         }
     }
 
-    pub fn append(&mut self, mut block: IshIshBlock) -> Result<(), IshIshError> {
+    pub fn append(&mut self, block: IshIshBlock) -> Result<(), IshIshError> {
         self.verify_block(block.clone())?;
+        /* update internal state */
         self.blocks.push(block);
         Ok(())
     }
@@ -173,16 +181,16 @@ impl IshIshBlockchain {
         Ok(())
     }
 
-    pub fn verify_chain(&self) -> Result<(), IshIshError> {
+    pub fn verify_chain(chain: &IshIshBlockchain) -> Result<(), IshIshError> {
         
         /* First check the pow of each block */
-        for block in self.blocks.iter() {
-            self.verify_block(block.clone())?;
+        for block in chain.blocks.iter() {
+            chain.verify_block(block.clone())?;
         }
 
         /* Then check the links */
-        for i in 1..self.blocks.len() {
-            if self.blocks[i].header.prev_hash != self.blocks[i-1].header.cur_hash {
+        for i in 1..chain.blocks.len() {
+            if chain.blocks[i].header.prev_hash != chain.blocks[i-1].header.cur_hash {
                 return Err(IshIshError::PrevHashMismatch);
             }
         }

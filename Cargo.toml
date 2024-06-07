@@ -13,6 +13,7 @@ clap = { version = "4.5.4", features = ["derive"] }
 futures = "0.3.30"
 libp2p = { version = "0.53.2", features = ["tokio", "gossipsub", "mdns", "tcp", "tls", "dns", "async-std", "noise", "yamux", "macros"] }
 rand = "0.8.5"
+revm = { version = "9.0.0", features = ["ethersdb"] }
 serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.117"
 sha2 = "0.10.8"
