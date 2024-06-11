@@ -56,10 +56,7 @@ async fn create_new_wallet(
 async fn main() -> Result<(), Box<dyn Error>> {
 
     /* setup wallet dir path */
-    let mut path = PathBuf::new();
-    let home_dir = env::var_os("HOME").expect("HOME is not set in env.");
-    path.push(home_dir);
-    ensure_ishish_home(&path).await?;
+    let mut path = ensure_ishish_home().await?;
     
     path.push(ISHISH_HOME);
     println!("Home dir: {}", path.display());

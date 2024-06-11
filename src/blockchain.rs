@@ -171,7 +171,7 @@ impl IshIshBlock {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct IshIshBlockchain {
     pub blocks: Vec<IshIshBlock>,
 }
