@@ -1,4 +1,6 @@
-pub mod blockchain;
-pub mod utils;
-pub mod mining;
-pub mod data_layer;
+pub mod consensus;
+pub mod common;
+pub mod data;
+pub mod settlement;
+pub mod config;
+pub mod command;

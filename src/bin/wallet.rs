@@ -1,12 +1,13 @@
-use alloy::signers::wallet::{Wallet, LocalWallet};
+use alloy::signers::wallet::{
+    Wallet, 
+    LocalWallet
+};
 
 use tokio::{
     self
 };
-use std::{
-    error::Error,
-    fs
-};
+use std::error::Error;
+
 use rand::thread_rng;
 use clap::{
     Parser,
@@ -29,10 +30,9 @@ enum Commands {
     PrintPrivateKey { wallet: Option<String> },
 }
 
-use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use ishishnet::utils::{
+use ishishnet::common::{
     ensure_ishish_home,
     ISHISH_HOME
 };
