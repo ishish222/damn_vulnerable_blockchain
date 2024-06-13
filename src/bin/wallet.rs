@@ -33,8 +33,8 @@ enum Commands {
 use std::path::PathBuf;
 
 use dvb::common::{
-    ensure_ishish_home,
-    ISHISH_HOME
+    ensure_dvb_home,
+    DVB_HOME
 };
 
 async fn create_new_wallet(
@@ -56,9 +56,9 @@ async fn create_new_wallet(
 async fn main() -> Result<(), Box<dyn Error>> {
 
     /* setup wallet dir path */
-    let mut path = ensure_ishish_home().await?;
+    let mut path = ensure_dvb_home().await?;
     
-    path.push(ISHISH_HOME);
+    path.push(DVB_HOME);
     println!("Home dir: {}", path.display());
 
 

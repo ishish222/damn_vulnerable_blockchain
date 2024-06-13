@@ -2,14 +2,14 @@ use std::error::Error;
 
 use crate::config::Config;
 use crate::consensus::{
-    IshIshCommand,
+    DvbCommand,
     propose_block
 };
-use crate::common::ensure_ishish_home;
+use crate::common::ensure_dvb_home;
 use crate::data::broadcast_new_transaction;
 use crate::settlement::{
     get_address_balance,
-    IshIshTransaction
+    DvbTransaction
 };
 
 use alloy::signers::wallet::Wallet;
@@ -31,8 +31,8 @@ async fn start_command(
             ).await?;                                
 
             /* Send the new block to the mining thread */
-            cfg.command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
-            cfg.command_tx.send(IshIshCommand::Start).await?;
+            cfg.command_tx.send(DvbCommand::MineBlock(new_block)).await?;
+            cfg.command_tx.send(DvbCommand::Start).await?;
         },
         None => {
             println!("Please open a wallet first");
@@ -45,7 +45,7 @@ async fn start_command(
 async fn stop_command(
     cfg: &mut Config<'_>
 ) -> Result<(), Box<dyn Error>> {
-    cfg.command_tx.send(IshIshCommand::Stop).await?;
+    cfg.command_tx.send(DvbCommand::Stop).await?;
     Ok(())
 }
 
@@ -66,7 +66,7 @@ async fn open_command(
 
     std::io::stdin().read_line(&mut password)?;
 
-    let mut full_path = ensure_ishish_home().await?;
+    let mut full_path = ensure_dvb_home().await?;
 
     full_path.push(&wallet_name.trim());
 
@@ -161,18 +161,18 @@ async fn get_amount(
     Ok(input.trim().parse::<i64>().unwrap())
 }
 
-async fn send_ish(
+async fn send_dvb(
     cfg: &mut Config<'_>
 ) -> Result<(), Box<dyn Error>> {
 
     let src = get_address("Enter the name of the source wallet [coinbase]", cfg).await?;
     let dst = get_address("Enter the target wallet", cfg).await?;
-    let amount = get_amount("How much ish to send?").await?;
+    let amount = get_amount("How much dvb to send?").await?;
 
-    println!("Sending {amount} ish from {src} to {dst}");
+    println!("Sending {amount} dvb from {src} to {dst}");
 
     /* Prepare the transaction */
-    let transaction = IshIshTransaction {
+    let transaction = DvbTransaction {
         from: src,
         to: dst,
         amount,
@@ -205,7 +205,7 @@ pub async fn process_command(
         "open" => open_command(cfg).await?,
         "get_balance" => get_balance(cfg).await?,
         "print_pool" => print_pool(cfg).await?,
-        "send_ish" => send_ish(cfg).await?,
+        "send_dvb" => send_dvb(cfg).await?,
         _ => {
             println!("Unknown command: {command}");
         }

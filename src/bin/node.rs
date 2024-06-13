@@ -13,14 +13,14 @@ use tokio::{
 use tracing_subscriber::EnvFilter;
 
 use dvb::{
-    consensus::IshIshBlockchain,
+    consensus::DvbBlockchain,
     config::Config,
     common::{
-        ensure_ishish_home,
+        ensure_dvb_home,
         DEFAULT_DIFFICULTY
     },
     data::build_swarm,
-    settlement::IshIshTransaction
+    settlement::DvbTransaction
 };
 
 use revm::{
@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_env_filter(EnvFilter::from_default_env())
         .try_init();
 
-    ensure_ishish_home().await?;
+    ensure_dvb_home().await?;
 
     /* Setting up the data availability layer */
     let (
@@ -69,10 +69,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let my_evm = Evm::builder().with_db(my_state).build();
 
     /* Local transaction pool */
-    let my_transactions: Vec<IshIshTransaction> = Vec::new();
+    let my_transactions: Vec<DvbTransaction> = Vec::new();
 
     /* Local blockchain */
-    let my_blockchain = IshIshBlockchain::new();
+    let my_blockchain = DvbBlockchain::new();
 
     
     /* Prepare local mining task */

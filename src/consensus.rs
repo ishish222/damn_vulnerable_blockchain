@@ -15,22 +15,22 @@ use alloy::primitives::Address;
 use crate::data::broadcast_new_blockchain;
 use crate::settlement::{
     progress_state,
-    IshIshTransaction
+    DvbTransaction
 };
 use crate::config::Config;
-use crate::common::IshIshError;
+use crate::common::DvbError;
 
 pub fn process_new_blockchain(
-    new_blockchain: IshIshBlockchain, 
-    current_blockchain: IshIshBlockchain, 
-) -> Result<IshIshBlockchain, Box<dyn Error>> {
+    new_blockchain: DvbBlockchain, 
+    current_blockchain: DvbBlockchain, 
+) -> Result<DvbBlockchain, Box<dyn Error>> {
 
     println!("Got new blockchain: {new_blockchain:?}, verifying");
 
     if new_blockchain.blocks.len() > current_blockchain.blocks.len()
     {
         println!("Received blockchain is heavier, verifying hashes");
-        match IshIshBlockchain::verify_chain(&new_blockchain) {
+        match DvbBlockchain::verify_chain(&new_blockchain) {
             Ok(()) => {
                 println!("Verification passed, accepting new blockchain as local");
                 Ok(new_blockchain)
@@ -47,7 +47,7 @@ pub fn process_new_blockchain(
 }
 
 pub async fn process_block(
-    block: IshIshBlock, 
+    block: DvbBlock, 
     cfg: &mut Config<'_>
 ) -> Result<(), Box<dyn Error>> {
     println!("Successfuly mined block: {:?}", block);
@@ -71,7 +71,7 @@ pub async fn process_block(
     ).await?;      
 
     /* Send the command w/ new proposition */
-    cfg.command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
+    cfg.command_tx.send(DvbCommand::MineBlock(new_block)).await?;
 
     /* We broadcast info about the new blockchain via data availability layer */
     broadcast_new_blockchain(
@@ -83,7 +83,7 @@ pub async fn process_block(
     Ok(())
 }
 
-fn validate_pow(mut block: IshIshBlock, difficulty: usize) -> Result<bool, IshIshError> {
+fn validate_pow(mut block: DvbBlock, difficulty: usize) -> Result<bool, DvbError> {
     let mut hasher = Sha256::new();
 
     block.header.cur_hash = [0; 32];
@@ -93,7 +93,7 @@ fn validate_pow(mut block: IshIshBlock, difficulty: usize) -> Result<bool, IshIs
 
     let hash: [u8; 32] = match hasher.finalize().try_into() {
         Ok(arr) => arr,
-        Err(_) => return Err(IshIshError::HashConversionFailed), 
+        Err(_) => return Err(DvbError::HashConversionFailed), 
     };
 
     if hash.iter().take(difficulty).all(|&b| b == 0) {
@@ -105,8 +105,8 @@ fn validate_pow(mut block: IshIshBlock, difficulty: usize) -> Result<bool, IshIs
     }
 }
 
-pub enum IshIshCommand {
-    MineBlock(IshIshBlock),
+pub enum DvbCommand {
+    MineBlock(DvbBlock),
     Start,
     Restart,
     Stop
@@ -114,7 +114,7 @@ pub enum IshIshCommand {
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct IshIshBlockHeader {
+pub struct DvbBlockHeader {
     pub coinbase: Address,
     pub number: u64,
     pub nonce: u64,
@@ -123,7 +123,7 @@ pub struct IshIshBlockHeader {
     prev_hash: [u8; 32],
 }
 
-impl IshIshBlockHeader {
+impl DvbBlockHeader {
     pub fn no_prev(coinbase: Address, difficulty: usize) -> Self {
         Self {
             coinbase: coinbase,
@@ -135,7 +135,7 @@ impl IshIshBlockHeader {
         }
     }
 
-    pub fn from_prev_block(coinbase: Address, prev_block: &IshIshBlock, difficulty: usize) -> Self {
+    pub fn from_prev_block(coinbase: Address, prev_block: &DvbBlock, difficulty: usize) -> Self {
         Self {
             coinbase: coinbase,
             number: prev_block.header.number + 1,
@@ -148,13 +148,13 @@ impl IshIshBlockHeader {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct IshIshBlock {
-    pub header: IshIshBlockHeader,
-    pub content: Vec<IshIshTransaction>,
+pub struct DvbBlock {
+    pub header: DvbBlockHeader,
+    pub content: Vec<DvbTransaction>,
 }
 
-impl IshIshBlock {
-    pub fn no_prev(coinbase: Address, transactions: &mut Vec<IshIshTransaction>, difficulty: usize) -> Self {
+impl DvbBlock {
+    pub fn no_prev(coinbase: Address, transactions: &mut Vec<DvbTransaction>, difficulty: usize) -> Self {
         let mut content = Vec::new();
 
         /* We include at most top 3 transactions */
@@ -164,12 +164,12 @@ impl IshIshBlock {
         }
         
         Self {
-            header: IshIshBlockHeader::no_prev(coinbase, difficulty),
+            header: DvbBlockHeader::no_prev(coinbase, difficulty),
             content: content
         }
     }
 
-    pub fn from_prev_block(coinbase: Address, transactions: &mut Vec<IshIshTransaction>, prev_block: &IshIshBlock, difficulty: usize) -> Self {
+    pub fn from_prev_block(coinbase: Address, transactions: &mut Vec<DvbTransaction>, prev_block: &DvbBlock, difficulty: usize) -> Self {
         let mut content = Vec::new();
         
         /* We include at most top 3 transactions */
@@ -179,42 +179,42 @@ impl IshIshBlock {
         }
         
         Self {
-            header: IshIshBlockHeader::from_prev_block(coinbase, prev_block, difficulty),
+            header: DvbBlockHeader::from_prev_block(coinbase, prev_block, difficulty),
             content: content
         }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Default)]
-pub struct IshIshBlockchain {
-    pub blocks: Vec<IshIshBlock>,
+pub struct DvbBlockchain {
+    pub blocks: Vec<DvbBlock>,
 }
 
-impl IshIshBlockchain {
+impl DvbBlockchain {
     pub fn new() -> Self {
         Self {
             blocks: Vec::new()
         }
     }
 
-    pub fn append(&mut self, block: IshIshBlock) -> Result<(), IshIshError> {
+    pub fn append(&mut self, block: DvbBlock) -> Result<(), DvbError> {
         self.verify_block(block.clone())?;
         /* update internal state */
         self.blocks.push(block);
         Ok(())
     }
     
-    fn verify_block(&self, block: IshIshBlock) -> Result<(), IshIshError> {
+    fn verify_block(&self, block: DvbBlock) -> Result<(), DvbError> {
         let pow_ok = validate_pow(block.clone(), block.header.difficulty)?;
         
         // check POW
         if !pow_ok {
-            return Err(IshIshError::InvalidProofOfWork);
+            return Err(DvbError::InvalidProofOfWork);
         }        
         Ok(())
     }
 
-    pub fn verify_chain(chain: &IshIshBlockchain) -> Result<(), IshIshError> {
+    pub fn verify_chain(chain: &DvbBlockchain) -> Result<(), DvbError> {
         
         /* First check the pow of each block */
         for block in chain.blocks.iter() {
@@ -224,7 +224,7 @@ impl IshIshBlockchain {
         /* Then check the links */
         for i in 1..chain.blocks.len() {
             if chain.blocks[i].header.prev_hash != chain.blocks[i-1].header.cur_hash {
-                return Err(IshIshError::PrevHashMismatch);
+                return Err(DvbError::PrevHashMismatch);
             }
         }
 
@@ -234,9 +234,9 @@ impl IshIshBlockchain {
 
 
 pub fn proof_of_work(
-    mut block: IshIshBlock, 
+    mut block: DvbBlock, 
     difficulty: usize
-    ) -> Result<IshIshBlock, IshIshError> {
+    ) -> Result<DvbBlock, DvbError> {
     println!("proof_of_work::start");
 
     let mut nonce = rand::thread_rng().gen();
@@ -250,7 +250,7 @@ pub fn proof_of_work(
 
         let hash: [u8; 32] = match hasher.finalize().try_into() {
             Ok(arr) => arr,
-            Err(_) => return Err(IshIshError::HashConversionFailed), 
+            Err(_) => return Err(DvbError::HashConversionFailed), 
         };
 
         if hash.iter().take(difficulty).all(|&b| b == 0) {
@@ -263,30 +263,30 @@ pub fn proof_of_work(
 }
 
 pub async fn mining_task(
-    mut command_rx: mpsc::Receiver<IshIshCommand>,
-    mut block_tx: mpsc::Sender<IshIshBlock>
-    ) -> Result<(), IshIshError> {
+    mut command_rx: mpsc::Receiver<DvbCommand>,
+    mut block_tx: mpsc::Sender<DvbBlock>
+    ) -> Result<(), DvbError> {
 
-    let mut current_block: Option<IshIshBlock> = None;
+    let mut current_block: Option<DvbBlock> = None;
     let mut running = false;
     
     loop {
         tokio::select! {
             cmd = command_rx.recv() => {
                 match cmd {
-                    Some(IshIshCommand::MineBlock(block)) => {
+                    Some(DvbCommand::MineBlock(block)) => {
                         println!("mining_task::Updating current_block");
                         current_block = Some(block);
                     },
-                    Some(IshIshCommand::Stop) => {
+                    Some(DvbCommand::Stop) => {
                         println!("mining_task::Stopping mining");
                         running = false;
                     },
-                    Some(IshIshCommand::Start) => {
+                    Some(DvbCommand::Start) => {
                         println!("mining_task::Starting mining");
                         running = true;
                     },
-                    Some(IshIshCommand::Restart) => {
+                    Some(DvbCommand::Restart) => {
                         println!("mining_task::Restarting mining");
                         running = true;
                     },
@@ -318,19 +318,19 @@ pub async fn mining_task(
 
 pub async fn propose_block(
     coinbase: Address, 
-    blockchain: &IshIshBlockchain,
+    blockchain: &DvbBlockchain,
     difficulty: usize,
-    transactions: &mut Vec<IshIshTransaction>
-) -> Result<IshIshBlock, Box<dyn std::error::Error>> {
+    transactions: &mut Vec<DvbTransaction>
+) -> Result<DvbBlock, Box<dyn std::error::Error>> {
     
     println!("Building a block proposal");
     if blockchain.blocks.len() == 0 {
-        Ok(IshIshBlock::no_prev(coinbase, transactions, difficulty))
+        Ok(DvbBlock::no_prev(coinbase, transactions, difficulty))
     }
     else {
         let mined_block = blockchain.blocks.last().unwrap();
         
-        let next = IshIshBlock::from_prev_block(
+        let next = DvbBlock::from_prev_block(
             coinbase,
             transactions, 
             &mined_block,

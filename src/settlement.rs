@@ -5,8 +5,8 @@ use alloy::primitives::{Address, U256};
 use serde::{Serialize, Deserialize};
 
 use crate::consensus::{
-    IshIshBlockchain,
-    IshIshBlock,
+    DvbBlockchain,
+    DvbBlock,
 };
 
 
@@ -44,7 +44,7 @@ fn decrease_account(
 
 fn process_transaction(
     db: &mut InMemoryDB,
-    tx: &IshIshTransaction,
+    tx: &DvbTransaction,
 ) -> Result<(), Box<dyn Error>>
 {
     let from = tx.from;
@@ -59,8 +59,8 @@ fn process_transaction(
 }
 
 fn remove_transaction_from_pool(
-    tx: &IshIshTransaction,
-    transactions: &mut Vec<IshIshTransaction>,
+    tx: &DvbTransaction,
+    transactions: &mut Vec<DvbTransaction>,
 ) -> Result<(), Box<dyn Error>>
 {
     for (i, my_txs) in transactions.iter().enumerate() {
@@ -77,8 +77,8 @@ fn remove_transaction_from_pool(
 
 pub fn progress_state(
     db: &mut InMemoryDB, 
-    block: &IshIshBlock, 
-    transactions: &mut Vec<IshIshTransaction>
+    block: &DvbBlock, 
+    transactions: &mut Vec<DvbTransaction>
 ) -> Result<(), Box<dyn Error>> {
     /* reward coinbase */
     let coinbase = block.header.coinbase;
@@ -106,8 +106,8 @@ pub fn get_address_balance(
 
 pub fn refresh_state(
     db: &mut InMemoryDB, 
-    chain: &IshIshBlockchain, 
-    transactions: &mut Vec<IshIshTransaction>
+    chain: &DvbBlockchain, 
+    transactions: &mut Vec<DvbTransaction>
 ) -> Result<(), Box<dyn Error>> {
 
     /* Progress the state for each block in the blockchain */
@@ -118,7 +118,7 @@ pub fn refresh_state(
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct IshIshTransaction {
+pub struct DvbTransaction {
     pub from: Address,
     pub to: Address,
     pub amount: i64,

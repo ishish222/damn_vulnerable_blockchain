@@ -8,28 +8,28 @@ use std::{
     fs
 };
 
-pub const ISHISH_HOME: &str = ".ishish";
-pub const ISHISH_TOPIC: &str = "test-net";
+pub const DVB_HOME: &str = ".dvb";
+pub const DVB_TOPIC: &str = "test-net";
 pub const DEFAULT_DIFFICULTY: u32 = 2;
 
-pub async fn ensure_ishish_home(
+pub async fn ensure_dvb_home(
 ) -> Result<PathBuf, Box<dyn Error>> {
     /* setup wallet dir path */
     let mut path = PathBuf::new();
-    let home_dir = env::var_os("HOME").expect("HOME is not set in env.");
+    let home_dir = env::var_os("HOME").unwrap();
     path.push(home_dir);
-    path.push(ISHISH_HOME);
+    path.push(DVB_HOME);
 
     if !path.exists() {
-        println!("Creating ishish home dir");
-        fs::create_dir_all(&path).expect("Failed to create ishish home dir");
+        println!("Creating dvb home dir");
+        fs::create_dir_all(&path)?;
     }
     Ok(path)
 }
 
 
 #[derive(Debug)]
-pub enum IshIshError {
+pub enum DvbError {
     ParseError,
     InvalidMessageHeader,
     EmptyMessage,
@@ -42,7 +42,7 @@ pub enum IshIshError {
     RequestedBlockIsNone
 }
 
-impl Display for IshIshError {
+impl Display for DvbError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> 
     { 
         write!(f, "Error");
@@ -50,17 +50,17 @@ impl Display for IshIshError {
     }
 }
 
-impl Error for IshIshError {}
+impl Error for DvbError {}
 
-impl From<Utf8Error> for IshIshError {
+impl From<Utf8Error> for DvbError {
     fn from(_: Utf8Error) -> Self {
-        IshIshError::ParseError
+        DvbError::ParseError
     }
 }
 
-impl From<serde_json::Error> for IshIshError {
+impl From<serde_json::Error> for DvbError {
     fn from(_: serde_json::Error) -> Self {
-        IshIshError::ParseError
+        DvbError::ParseError
     }
 }
 

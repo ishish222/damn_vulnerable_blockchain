@@ -30,32 +30,32 @@ use libp2p::{
 };
 
 use crate::consensus::{
-    IshIshBlockchain, 
-    IshIshCommand
+    DvbBlockchain, 
+    DvbCommand
 };
 
 use crate::config::Config;
-use crate::common::IshIshError;
+use crate::common::DvbError;
 use crate::consensus::{
     process_new_blockchain,
     propose_block
 };
 use crate::settlement::{
-    IshIshTransaction,
+    DvbTransaction,
     refresh_state
 };
 
-use crate::common::ISHISH_TOPIC;
+use crate::common::DVB_TOPIC;
 
 // We create a custom network behaviour that combines Gossipsub and Mdns.
 #[derive(NetworkBehaviour)]
-pub struct IshIshClientBehavior {
+pub struct DvbClientBehavior {
     pub gossipsub: gossipsub::Behaviour,
     pub mdns: mdns::tokio::Behaviour,
 }
 
 pub async fn swarm_publish(
-    swarm: &mut libp2p::Swarm<IshIshClientBehavior>, 
+    swarm: &mut libp2p::Swarm<DvbClientBehavior>, 
     topic: &IdentTopic,
     message: &str
 ) -> Result<(), Box<dyn Error>> {
@@ -68,9 +68,9 @@ pub async fn swarm_publish(
 }
 
 pub async fn broadcast_new_blockchain(
-    swarm: &mut libp2p::Swarm<IshIshClientBehavior>, 
+    swarm: &mut libp2p::Swarm<DvbClientBehavior>, 
     topic: &IdentTopic, 
-    blockchain: &IshIshBlockchain
+    blockchain: &DvbBlockchain
 ) -> Result<(), Box<dyn Error>> {
     /* Broadcast info about the new blockchain via data availability layer */
     let mut line = String::from("NBM");
@@ -84,9 +84,9 @@ pub async fn broadcast_new_blockchain(
 }
 
 pub async fn broadcast_new_transaction(
-    swarm: &mut libp2p::Swarm<IshIshClientBehavior>, 
+    swarm: &mut libp2p::Swarm<DvbClientBehavior>, 
     topic: &IdentTopic, 
-    transaction: &IshIshTransaction
+    transaction: &DvbTransaction
 ) -> Result<(), Box<dyn Error>> {
     /* Broadcast info about the new blockchain via data availability layer */
     let mut line = String::from("TRA");
@@ -99,7 +99,7 @@ pub async fn broadcast_new_transaction(
 }
 
 pub fn build_swarm(
-) -> Result<(libp2p::Swarm<IshIshClientBehavior>, IdentTopic), Box<dyn Error>> {
+) -> Result<(libp2p::Swarm<DvbClientBehavior>, IdentTopic), Box<dyn Error>> {
     let mut swarm = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
         .with_tcp(
@@ -131,13 +131,13 @@ pub fn build_swarm(
 
             let mdns =
                 mdns::tokio::Behaviour::new(mdns::Config::default(), key.public().to_peer_id())?;
-            Ok(IshIshClientBehavior { gossipsub, mdns })
+            Ok(DvbClientBehavior { gossipsub, mdns })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
     // Create a Gossipsub topic
-    let topic = gossipsub::IdentTopic::new(ISHISH_TOPIC);
+    let topic = gossipsub::IdentTopic::new(DVB_TOPIC);
 
     // subscribes to our topic
     swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
@@ -150,10 +150,10 @@ async fn process_blockchain_event(
 ) -> Result<(), Box<dyn Error>> {
 
     if let libp2p::gossipsub::Event::Message { message, ..} = event {
-        match IshIshBlockchainEvent::try_from(&message.data)? {
-            IshIshBlockchainEvent::NewBlockMined(serialized) => {
+        match DvbBlockchainEvent::try_from(&message.data)? {
+            DvbBlockchainEvent::NewBlockMined(serialized) => {
                 /* Deserializing */
-                let new_blockchain: IshIshBlockchain = serde_json::from_str(&serialized)?;
+                let new_blockchain: DvbBlockchain = serde_json::from_str(&serialized)?;
     
                 /* Processing, consume both and return selected */
                 cfg.blockchain = process_new_blockchain(
@@ -179,14 +179,14 @@ async fn process_blockchain_event(
                         cfg.difficulty, 
                         &mut cfg.transactions
                     ).await?;                                    
-                    cfg.command_tx.send(IshIshCommand::MineBlock(new_block)).await?;
+                    cfg.command_tx.send(DvbCommand::MineBlock(new_block)).await?;
 
                 } else {
                     println!("No wallet opened, can't propose block");
                 };
             },
-            IshIshBlockchainEvent::NewSignedTransaction(transaction_str) => {
-                let transaction: IshIshTransaction = serde_json::from_str(&transaction_str)?;
+            DvbBlockchainEvent::NewSignedTransaction(transaction_str) => {
+                let transaction: DvbTransaction = serde_json::from_str(&transaction_str)?;
     
                 println!("Got new transaction: {:?}", transaction);
     
@@ -196,7 +196,7 @@ async fn process_blockchain_event(
                 println!("Current pool: {:?}", cfg.transactions);
     
             },
-            IshIshBlockchainEvent::SthElse((msg,re)) => {
+            DvbBlockchainEvent::SthElse((msg,re)) => {
                 println!("Something else: {msg} {re}");
             }
         }
@@ -206,24 +206,24 @@ async fn process_blockchain_event(
 }
 
 pub async fn process_event(
-    event: SwarmEvent<IshIshClientBehaviorEvent>, //why not dyn here?
+    event: SwarmEvent<DvbClientBehaviorEvent>, //why not dyn here?
     cfg: &mut Config<'_>
 ) -> Result<(), Box<dyn Error>> {
     
     match event {
-        SwarmEvent::Behaviour(IshIshClientBehaviorEvent::Mdns(mdns::Event::Discovered(list))) => {
+        SwarmEvent::Behaviour(DvbClientBehaviorEvent::Mdns(mdns::Event::Discovered(list))) => {
             for (peer_id, _multiaddr) in list {
                 println!("mDNS discovered a new peer: {peer_id}");
                 cfg.swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
             }
         },
-        SwarmEvent::Behaviour(IshIshClientBehaviorEvent::Mdns(mdns::Event::Expired(list))) => {
+        SwarmEvent::Behaviour(DvbClientBehaviorEvent::Mdns(mdns::Event::Expired(list))) => {
             for (peer_id, _multiaddr) in list {
                 println!("mDNS discover peer has expired: {peer_id}");
                 cfg.swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
             }
         },
-        SwarmEvent::Behaviour(IshIshClientBehaviorEvent::Gossipsub(event)) => {
+        SwarmEvent::Behaviour(DvbClientBehaviorEvent::Gossipsub(event)) => {
             process_blockchain_event(event, cfg).await?;
         },
         SwarmEvent::NewListenAddr { address, .. } => {
@@ -235,16 +235,16 @@ pub async fn process_event(
 
 }
 
-pub enum IshIshBlockchainEvent<'a> {
+pub enum DvbBlockchainEvent<'a> {
     NewBlockMined(&'a str),
     SthElse((&'a str, &'a str)),
     NewSignedTransaction(&'a str),
 }
 
-impl<'a> TryFrom<&'a Vec<u8>> for IshIshBlockchainEvent<'a> {
-    type Error = IshIshError;
+impl<'a> TryFrom<&'a Vec<u8>> for DvbBlockchainEvent<'a> {
+    type Error = DvbError;
 
-    fn try_from(value: &'a Vec<u8>) -> Result<Self, IshIshError> 
+    fn try_from(value: &'a Vec<u8>) -> Result<Self, DvbError> 
     {
         let value_str = std::str::from_utf8(value)?;
     
@@ -252,12 +252,12 @@ impl<'a> TryFrom<&'a Vec<u8>> for IshIshBlockchainEvent<'a> {
 
         match header {
             "NBM" => {
-                return Ok(IshIshBlockchainEvent::NewBlockMined(message))
+                return Ok(DvbBlockchainEvent::NewBlockMined(message))
             },
             "TRA" => {
-                return Ok(IshIshBlockchainEvent::NewSignedTransaction(message))
+                return Ok(DvbBlockchainEvent::NewSignedTransaction(message))
             },
-            _ => return Ok(IshIshBlockchainEvent::SthElse((header, message)))
+            _ => return Ok(DvbBlockchainEvent::SthElse((header, message)))
         }
     }
 }
