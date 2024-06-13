@@ -12,7 +12,7 @@ use tokio::{
 
 use tracing_subscriber::EnvFilter;
 
-use ishishnet::{
+use dvb::{
     consensus::IshIshBlockchain,
     config::Config,
     common::{
@@ -30,12 +30,12 @@ use revm::{
     },
     Evm,
 };
-use ishishnet::command::process_command;
-use ishishnet::consensus::{
+use dvb::command::process_command;
+use dvb::consensus::{
     process_block,
     mining_task
 };
-use ishishnet::data::process_event;
+use dvb::data::process_event;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

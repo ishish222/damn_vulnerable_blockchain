@@ -32,7 +32,7 @@ enum Commands {
 
 use std::path::PathBuf;
 
-use ishishnet::common::{
+use dvb::common::{
     ensure_ishish_home,
     ISHISH_HOME
 };
