@@ -32,10 +32,7 @@ enum Commands {
 
 use std::path::PathBuf;
 
-use dvb::common::{
-    ensure_dvb_home,
-    DVB_HOME
-};
+use dvb::common::ensure_dvb_home;
 
 async fn create_new_wallet(
     path: &PathBuf,
@@ -56,14 +53,12 @@ async fn create_new_wallet(
 async fn main() -> Result<(), Box<dyn Error>> {
 
     /* setup wallet dir path */
-    let mut path = ensure_dvb_home().await?;
+    let path = ensure_dvb_home().await?;
     
-    path.push(DVB_HOME);
     println!("Home dir: {}", path.display());
 
 
     let args = Args::parse();
-    println!("Args: {:?}", args);
 
     match &args.command {
         Commands::Create { wallet} => {
@@ -88,13 +83,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 if response.trim() == "yes" {
                     println!("Overwriting wallet");
                     let wallet = create_new_wallet(&path, &mut full_path).await?;
-                    println!("Created wallet: {} in keystore {}/{}", wallet.address(), path.display(), full_path.display());
+                    println!("Created wallet: {} in keystore {}", wallet.address(), full_path.display());
                 } else {
                     println!("Not overwriting wallet, quitting");
                 }
             } else {
                 let wallet = create_new_wallet(&path, &mut full_path).await?;
-                println!("Created wallet: {} in keystore {}/{}", wallet.address(), path.display(), full_path.display());
+                println!("Created wallet: {} in keystore {}", wallet.address(), full_path.display());
 
             }
         },
@@ -136,7 +131,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             std::io::stdin().read_line(&mut password).expect("Failed to read line");
 
             let signer = Wallet::decrypt_keystore(full_path, password)?;
-            println!("Wallet: {}", signer.to_bytes());
+            println!("Private key: {}", signer.to_bytes());
         }
     }
 
