@@ -77,6 +77,8 @@ The node will send the updates on successfully mined blocks and pool updates to 
 
 ### Node commands summary
 
+You need to enter the commands into stdin. First enter the keyword, then the required parameters.
+
 The node accepts the following commands on the stdin:
 - start
 - stop
