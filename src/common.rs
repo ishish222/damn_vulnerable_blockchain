@@ -8,6 +8,10 @@ use std::{
     fs
 };
 
+use tokio::sync::mpsc;
+
+use crate::consensus::DvbBlock;
+
 pub const DVB_HOME: &str = ".dvb";
 pub const DVB_TOPIC: &str = "test-net";
 pub const DEFAULT_DIFFICULTY: u32 = 2;
@@ -45,7 +49,7 @@ pub enum DvbError {
 impl Display for DvbError {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> 
     { 
-        write!(f, "Error");
+        write!(f, "Error")?;
         Ok(())
     }
 }
@@ -60,6 +64,12 @@ impl From<Utf8Error> for DvbError {
 
 impl From<serde_json::Error> for DvbError {
     fn from(_: serde_json::Error) -> Self {
+        DvbError::ParseError
+    }
+}
+
+impl From<mpsc::error::SendError<DvbBlock>> for DvbError {
+    fn from(_: mpsc::error::SendError<DvbBlock>) -> Self {
         DvbError::ParseError
     }
 }

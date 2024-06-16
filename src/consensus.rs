@@ -264,7 +264,7 @@ pub fn proof_of_work(
 
 pub async fn mining_task(
     mut command_rx: mpsc::Receiver<DvbCommand>,
-    mut block_tx: mpsc::Sender<DvbBlock>
+    block_tx: mpsc::Sender<DvbBlock>
     ) -> Result<(), DvbError> {
 
     let mut current_block: Option<DvbBlock> = None;
@@ -306,7 +306,7 @@ pub async fn mining_task(
                 match mined_block {
                     Some(mined_block) => {
                         println!("mining_task: Mined block");
-                        block_tx.send(mined_block).await;
+                        block_tx.send(mined_block).await?;
                         current_block = None;
                     },
                     None => {}

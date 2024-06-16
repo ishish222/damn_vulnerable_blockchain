@@ -137,9 +137,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let signer = Wallet::decrypt_keystore(full_path, password)?;
             println!("Wallet: {}", signer.to_bytes());
-        },
-        _ => { 
-            println!("Not implemented");
         }
     }
 
